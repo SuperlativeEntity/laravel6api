@@ -1,0 +1,3 @@
+can you skip the accept screen?
+auth per user? role and permissions?
+multi-tenant?

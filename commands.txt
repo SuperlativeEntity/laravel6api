@@ -1,0 +1,103 @@
+# laravel version
+php artisan --version
+
+# check registered routes
+php artisan api:routes
+
+# generate api docs : http://<app>/docs/
+php artisan apidoc:generate
+
+# create a PKCE-enabled client (no secret)
+php artisan passport:client --public
+
+# chrome://flags/#unsafely-treat-insecure-origin-as-secure (in chrome)
+for any digest issues
+
+# creating a password grant client
+# This allows you to issue access tokens securely to your first-party clients without requiring your users to go through the entire OAuth2 authorization code redirect flow.
+php artisan passport:client --password
+
+# create another laravel app pointing to the same database as this project
+# make the app keys the same, then you can test the oauth auth code generation
+# the client should be added to the Authorized Applications
+# the routes below go into the web.php routes file in the consumer app
+
+Route::get('/', function () {
+    $query = http_build_query([
+        'client_id' => '3',
+        'redirect_uri' => 'http://consumer.test:7070/callback',
+        'response_type' => 'code',
+        'scope' => '',
+    ]);
+
+    return redirect('http://laravel6api.test:7070/oauth/authorize?'.$query);
+});
+
+Route::get('/callback', function (\Illuminate\Http\Request $request) {
+    $http = new GuzzleHttp\Client;
+
+    $response = $http->post('http://laravel6api.test:7070/oauth/token', [
+        'form_params' => [
+            'grant_type' => 'authorization_code',
+            'client_id' => '3',
+            'client_secret' => 'xqkCHQiS5cH6atOyOTHk31CAQ9DtZ4GKeyUNkXQu',
+            'redirect_uri' => 'http://consumer.test:7070/callback',
+            'code' => $request->code,
+        ],
+    ]);
+
+    return json_decode((string) $response->getBody(), true);
+});
+
+# pkce
+
+Route::get('/redirect_pkce', function (Request $request) {
+    $request->session()->put('state', $state = Str::random(40));
+
+    $request->session()->put('code_verifier', $code_verifier = Str::random(128));
+
+    $codeChallenge = strtr(rtrim(
+        base64_encode(hash('sha256', $code_verifier, true))
+        , '='), '+/', '-_');
+
+    $query = http_build_query([
+        'client_id' => '4',
+        'redirect_uri' => 'http://consumer.test:7070/callback_pkce',
+        'response_type' => 'code',
+        'scope' => '',
+        'state' => $state,
+        'code_challenge' => $codeChallenge,
+        'code_challenge_method' => 'S256',
+    ]);
+
+    return redirect('http://laravel6api.test:7070/oauth/authorize?'.$query);
+});
+
+Route::get('/callback_pkce', function (Request $request) {
+    $state = $request->session()->pull('state');
+
+    $codeVerifier = $request->session()->pull('code_verifier');
+
+    throw_unless(
+        strlen($state) > 0 && $state === $request->state,
+        InvalidArgumentException::class
+    );
+
+    $response = (new GuzzleHttp\Client)->post('http://laravel6api.test:7070/oauth/token', [
+        'form_params' => [
+            'grant_type' => 'authorization_code',
+            'client_id' => '4',
+            'redirect_uri' => 'http://consumer.test:7070/callback_pkce',
+            'code_verifier' => $codeVerifier,
+            'code' => $request->code,
+        ],
+    ]);
+
+    return json_decode((string) $response->getBody(), true);
+});
+
+# response example
+{"token_type":"Bearer",
+"expires_in":1296000,
+"access_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIzIiwianRpIjoiMmVkNGJhZTUyNmIyNTZhNzMyNjM4ZTQxZTFjOWY5ZGY4ODIwYjYwMzc0ODQwYjNiMmYzZDIzMWE1ZjU1YmFiMjdkMmI4ZWZhMWRlZmM2NGMiLCJpYXQiOjE1ODEyNzYwNDcsIm5iZiI6MTU4MTI3NjA0NywiZXhwIjoxNTgyNTcyMDQ3LCJzdWIiOiIxIiwic2NvcGVzIjpbXX0.RDuE6EdqWOWhKUKVlLjggqUIraUNqYfsm4330bkvEuRHfKHsb_ZrBZSgseNC7CS7ugTJGMdJBLAk7Webvrduzqsjms_Gh1mb0LnzolAiFfSMEkVRH0lYJnVieRr65x8Ked4cZYdy28R8zXK545-mzyS4kqeunJpbK8DTWHTPE7BzMp9ZPorv6ESH7GpEq4q_ssyT6ykuxzL7gzHzu1WmIGGp5bDEVVGi7ldwPhXToKKn14odYoR2P0U8bPFN8e52CxmnVapENdivnu8HzfpGGwlUnKOp8QeWV1EHFF42fke6lyxHU7tLMAYTrjFMvjmkPnBNjXcXUv7ZYY-6xRGsNzA7BqJU8UT_3SYY-XGkWzrXhRi3vBRXTXYMK1jutmwpft4LOBap_aPb75WoKSoDoplBIxv8kqC0dA_FJCoyi_mxDmAbJQ2dvaDquwcy2MBV8biTfWuxh_r0tnwrD4AgWpVuZHw_-TvmFNeiMhUh4xw0Wp3TEXEqahOCs_lM0q4i8OJbgYNSBCmppdAzfIORd7z9o4843Si5Y5F8pOhx4kZ4Qgs2PrxdDM96nCArquL6YhRAXq6KZg_GMLTl9LZ-Me-zfmYDmU0B5DoTIRqLBCh3fWH4_pVf0Eq2-HW_uCQ9q-9DU9x7cHKKfvEPtig5a_fS_he9C_p4AMa9nL9Ocxk",
+"refresh_token":"def5020053eefc0b4abaabc41b6af3e00819f40b8542f2d07c42b3f3f49676d39957c99a7121986a66027d8dc37c3210b1904771515df6ab9bbee15ef95e34913343d3e88ce932e80ed2829828e39dd7a1164d8c3f650b076456a009279c41ce33b1bb54743f4749151fd0f69ee3f2c22e9d04204adf7799763c2d30a0ad5a61a3663b227b816bf2d6a606e0952431d20931e70de39eecd6ea71276038b49ce0578166928b67117db66ef7b3adbb97f65910962b71b5cc10dcf6d256ba38294dedcda71e5d099061d4f8a06c12cbe8dc0814b911541fa62181b4210228aa4d5cca72348d84f9a52ffb2b83046128d25b5d02d6324785563eac50c1dd36d32739077f2d00a264e1a8f49ba21b1eda251cd65fbac8781b6a39f94dc8c9e129b2bf9709fb34b9837b4f009880ff1f5e5ed13b1e23e24841d771171ade8fd290a91395d3af5c6d7dce5e15813325acc4e7aeacf9cc02f59a0e59a1f52bc7eeedb130dd"}
